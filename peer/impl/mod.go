@@ -22,7 +22,7 @@ import (
 const sendTimeout = 500 * time.Millisecond
 const serverIP = "20.208.131.198"
 
-var chanTargetAddr chan string
+
 // NewPeer creates a new peer. You can change the content and location of this
 // function but you MUST NOT change its signature and package location.
 func NewPeer(conf peer.Configuration) peer.Peer {
@@ -100,7 +100,7 @@ func (n *node) Start() error {
 		go n.AntiEntropy()
 	}
 
-	n.register(serverIP)
+	//connReg := n.register(serverIP)
 
 	localIP := strings.Split(n.conf.Socket.GetAddress(), ":")[0]
 	nodeAddr := localIP + ":" + strconv.Itoa(n.port)
@@ -111,7 +111,6 @@ func (n *node) Start() error {
 		return nil
 	}
 	n.socketNAT = sock
-	chanTargetAddr = make(chan string, 1)
 	go func() {
 		for{
 			pkt, err := n.socketNAT.Recv(time.Second * 10)
@@ -122,6 +121,12 @@ func (n *node) Start() error {
 			}
 			fmt.Println(pkt.Header.Source)
 			fmt.Println(n.conf.Socket.GetAddress())
+			pktBuffer, err := pkt.Marshal()
+			if err != nil {
+				log.Err(err).Msgf("failed to marshal packet data")
+				return 
+			}
+			fmt.Println(string(pktBuffer))
 			if pkt.Header.Source != n.conf.Socket.GetAddress() {
 				header := transport.NewHeader(nodeAddr, nodeAddr, n.conf.Socket.GetAddress(), 0)
 				pkt.Header = &header
@@ -134,18 +139,23 @@ func (n *node) Start() error {
 				}
 				fmt.Println("send locally success")
 			}else{
-				targetAddr := <- chanTargetAddr
-				fmt.Println("receive target addr")
-				header := transport.NewHeader(nodeAddr, nodeAddr, targetAddr, 0)
-				pkt.Header = &header
-				fmt.Println("send to target")
-				err = n.socketNAT.Send(targetAddr, pkt, sendTimeout)
-				if err != nil {
-					fmt.Println(err.Error())
-					log.Err(err).Msg("errors: failed to send unicast message")
-					return
-				}
-				fmt.Println("send success")
+				// targetAddr := <- chanTargetAddr
+				// fmt.Println("receive target addr")
+				// localUDPAddr := net.UDPAddr{Port: n.port,}
+				// strs := strings.Split(targetAddr, ":")
+				// ip := strs[0]
+				// port, _ := strconv.Atoi(strs[1])
+				// targetUDPAddr := net.UDPAddr{
+				// 	IP: net.ParseIP(ip),
+				// 	Port: port,}
+				// conn, err := net.DialUDP("udp", &localUDPAddr, &targetUDPAddr)
+				// if err != nil{
+				// 	return 
+				// }
+				fmt.Println("start to write")
+				//connReg.Write(pktBuffer)
+				fmt.Println("write successful")
+
 			}
 		}
 	}()
@@ -153,7 +163,56 @@ func (n *node) Start() error {
 	// panic("to be implemented in HW0")
 }
 
-func (n *node) register(serverRegIP string) {
+// func (n *node) listenServer(serverRegIP string){
+// 	listener, err := net.ListenUDP("udp", &net.UDPAddr{Port: 2999})
+// 	if err != nil {
+// 		return 
+// 	}
+// 	buf := make([]byte, 256)
+// 	l, _, err := listener.ReadFromUDP(buf)
+// 	if err != nil {
+// 		return
+// 	}
+// 	addr := string(buf[:l])
+// 	localUDPAddr := net.UDPAddr{Port: n.port,}
+// 	strs := strings.Split(addr, ":")
+// 	ip := strs[0]
+// 	port, _ := strconv.Atoi(strs[1])
+// 	targetUDPAddr := net.UDPAddr{
+// 		IP: net.ParseIP(ip),
+// 		Port: port,}
+// 	conn, err := net.DialUDP("udp", &localUDPAddr, &targetUDPAddr)
+// 	if err != nil{
+// 		return 
+// 	}
+	
+// 	buf = make([]byte, 256)
+// 	l, _, err = conn.ReadFromUDP(buf)
+// 	if err != nil {
+// 		return
+// 	}
+// 	packet := transport.Packet{}
+// 	buffer := buf[:l]
+// 	err = packet.Unmarshal(buffer)
+// 	if err != nil {
+// 		return 
+// 	}
+// 	localIP := strings.Split(n.conf.Socket.GetAddress(), ":")[0]
+// 	nodeAddr := localIP + ":" + strconv.Itoa(n.port)
+// 	header := transport.NewHeader(nodeAddr, nodeAddr, n.conf.Socket.GetAddress(), 0)
+// 	packet.Header = &header
+// 	fmt.Println("send to target")
+// 	err = n.socketNAT.Send(n.conf.Socket.GetAddress(), packet, sendTimeout)
+// 	if err != nil {
+// 		fmt.Println(err.Error())
+// 		log.Err(err).Msg("errors: failed to send unicast message")
+// 		return
+// 	}
+// 	fmt.Println("send success")
+
+// }
+
+func (n *node) register(serverRegIP string) *net.UDPConn {
 
 	fmt.Println(n.port)
 	localAddr := net.UDPAddr{Port: n.port}
@@ -170,44 +229,19 @@ func (n *node) register(serverRegIP string) {
 	conn, err := net.DialUDP("udp", &localAddr, &remoteAddr)
 	if err != nil {
 		fmt.Println(err.Error())
-		return
+		return nil
 	}
 	fmt.Println("register message to server")
 	conn.Write([]byte("This is peer: " + n.conf.Socket.GetAddress()))
 	buf := make([]byte, 256)
 	l, _, err := conn.ReadFromUDP(buf)
 	if err != nil {
-		return
+		return nil
 	}
 	fmt.Printf("%s \n", buf[:l])
-	conn.Close()
-
+	// conn.Close()
+	return conn
 }
-
-// func(n *node) register(serverIP string) {
-// 	chat := types.ChatMessage{
-// 		Message: "this is my IP address:" + n.conf.Socket.GetAddress(),
-// 	}
-// 	data, err := json.Marshal(&chat)
-// 	if err != nil{
-// 		return
-// 	}
-// 	msg := transport.Message{
-// 		Type:    chat.Name(),
-// 		Payload: data,
-// 	}
-// 	header := transport.NewHeader(n.conf.Socket.GetAddress(), n.conf.Socket.GetAddress(), serverIP, 0)
-// 	pkt := transport.Packet{
-// 		Header: &header,
-// 		Msg: &msg,
-// 	}
-// 	err = n.conf.Socket.Send(serverIP, pkt, sendTimeout)
-// 	if err != nil {
-// 		fmt.Println(err.Error())
-// 		log.Err(err).Msg("errors: failed to send unicast message")
-// 		return
-// 	}
-// }
 
 // Stop implements peer.Service
 func (n *node) Stop() error {
@@ -221,35 +255,35 @@ func (n *node) Stop() error {
 	// panic("to be implemented in HW0")
 }
 
-func (n *node) holePunching(dest string) string {
-	localAddr := net.UDPAddr{Port: n.port+1}
-	remoteAddr := net.UDPAddr{
-		IP:   net.ParseIP(serverIP),
-		Port: 8080,
-	}
-	fmt.Println("connect to server")
-	conn, err := net.DialUDP("udp", &localAddr, &remoteAddr)
-	if err != nil {
-		return ""
-	}
-	fmt.Println("request message to server")
-	conn.Write([]byte(n.conf.Socket.GetAddress() + "->" + dest))
+// func (n *node) holePunching(dest string) string {
+// 	localAddr := net.UDPAddr{Port: n.port+1}
+// 	remoteAddr := net.UDPAddr{
+// 		IP:   net.ParseIP(serverIP),
+// 		Port: 8080,
+// 	}
+// 	fmt.Println("connect to server")
+// 	conn, err := net.DialUDP("udp", &localAddr, &remoteAddr)
+// 	if err != nil {
+// 		return ""
+// 	}
+// 	fmt.Println("request message to server")
+// 	conn.Write([]byte(n.conf.Socket.GetAddress() + "->" + dest))
 
-	buf := make([]byte, 256)
-	l, _, err := conn.ReadFromUDP(buf)
-	if err != nil {
-		return ""
-	}
-	conn.Close()
-	fmt.Println(string(buf[:l]))
-	return string(buf[:l])
-	// if strings.Contains(string(buf[:l]), "currently not online"){
-	// 	// try a long time after
-	// 	return false
-	// } else if strings.Contains(string(buf[:l]), "busy"){
-	// 	// try a short time after
-	// }
-}
+// 	buf := make([]byte, 256)
+// 	l, _, err := conn.ReadFromUDP(buf)
+// 	if err != nil {
+// 		return ""
+// 	}
+// 	conn.Close()
+// 	fmt.Println(string(buf[:l]))
+// 	return string(buf[:l])
+// 	// if strings.Contains(string(buf[:l]), "currently not online"){
+// 	// 	// try a long time after
+// 	// 	return false
+// 	// } else if strings.Contains(string(buf[:l]), "busy"){
+// 	// 	// try a short time after
+// 	// }
+// }
 
 // func startRelayNode(n *node){
 // 	localIP := strings.Split(n.conf.Socket.GetAddress(), ":")[0]
@@ -280,10 +314,10 @@ func (n *node) Unicast(dest string, msg transport.Message) error {
 	// n.AddPeer(dest)
 	err := n.unicastLAN(dest, msg)
 	if strings.Contains(err.Error(), "unreachable dest") {
-		targetAddr := n.holePunching(dest)
-		if targetAddr == "" {
-			return nil
-		}
+		// targetAddr := n.holePunching(dest)
+		// if targetAddr == "" {
+		// 	return nil
+		// }
 		
 		header := transport.NewHeader(n.conf.Socket.GetAddress(), n.conf.Socket.GetAddress(), localAddr.String(), 0)
 		pkt := transport.Packet{
@@ -296,7 +330,7 @@ func (n *node) Unicast(dest string, msg transport.Message) error {
 			log.Err(err).Msg("errors: failed to send unicast message")
 			return fmt.Errorf("fail to send message")
 		}
-		chanTargetAddr <- targetAddr
+		// chanTargetAddr <- targetAddr
 		fmt.Println("send the target addr to channel")
 	} else if strings.Contains(err.Error(), "fail to send message") {
 		return fmt.Errorf("fail to send message")
