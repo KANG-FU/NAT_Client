@@ -4,10 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-
-	// "math/rand"
-
-	// "math/rand"
 	"net"
 	"os"
 	"strings"
@@ -22,14 +18,17 @@ import (
 )
 
 const sendTimeout = 500 * time.Millisecond
-const serverIP = "192.168.137.1"
+const serverIP = "20.203.183.91"
+const localIP = "10.20.0.133"
 
+// var chanTargetAddr chan string
 
 // NewPeer creates a new peer. You can change the content and location of this
 // function but you MUST NOT change its signature and package location.
 func NewPeer(conf peer.Configuration) peer.Peer {
 	// here you must return a struct that implements the peer.Peer functions.
 	// Therefore, you are free to rename and change it as you want.
+	rand.Seed(time.Now().UnixNano())
 
 	node := &node{
 		conf:          conf,
@@ -37,12 +36,11 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 		rumorSequence: 0,
 		status:        make(map[string]uint),
 		rumorsLog:     make(map[string][]types.Rumor),
-		port:          0,
+		port:          rand.Intn(3000) + 3000,
 	}
 
 	// initialization. Add itself to routing table
 	node.AddPeer(conf.Socket.GetAddress())
-	node.AddPeer(serverIP)
 	return node
 }
 
@@ -66,7 +64,8 @@ type node struct {
 	// all the rumors stored
 	rumorsLog map[string][]types.Rumor
 
-	port int
+	port      int
+	//socketNAT transport.ClosableSocket
 }
 
 const defaultLevel = zerolog.NoLevel
@@ -79,6 +78,8 @@ var logout = zerolog.ConsoleWriter{
 var Logger = zerolog.New(logout).Level(defaultLevel).
 	With().Timestamp().Logger().
 	With().Caller().Logger()
+
+// chanTargetAddr := make(chan string, 1)
 
 // Start implements peer.Service
 func (n *node) Start() error {
@@ -99,21 +100,98 @@ func (n *node) Start() error {
 		go n.AntiEntropy()
 	}
 
-	n.register(serverIP)
+	connReg := n.register(serverIP)
 
+	// localIP := strings.Split(n.conf.Socket.GetAddress(), ":")[0]
+	// nodeAddr := localIP + ":" + strconv.Itoa(n.port+1)
+	// trans := udp.NewUDP()
+
+	// sock, err := trans.CreateSocket(nodeAddr)
+	// if err != nil {
+	// 	return nil
+	// }
+	// chanTargetAddr = make(chan string, 1)
+	// n.socketNAT = sock
+	go func() {
+		for {
+			buf := make([]byte, 65000)
+			fmt.Println("waiting for server message")
+			l, _, err := connReg.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			fmt.Println("received server message")
+			fmt.Printf("%s \n", buf[:l])
+			// packet := transport.Packet{}
+			// err = packet.Unmarshal(buf[:l])
+			// if err != nil {
+			// 	log.Err(err).Msgf("failed to unmarshal UDP packet")
+			// 	return
+			// }
+			// err = n.conf.Socket.Send(n.conf.Socket.GetAddress(), packet, sendTimeout)
+			// if err != nil {
+			// 	log.Err(err).Msg("errors: failed to send unicast message")
+			// 	return
+			// }
+		}
+	}()
+
+	// go func() {
+	// 	for {
+	// 		pkt, err := n.socketNAT.Recv(time.Second * 10)
+	// 		if errors.Is(err, transport.TimeoutError(0)) {
+	// 			continue
+	// 		} else if err != nil {
+	// 			log.Err(err).Msg("socket recv has error")
+	// 		}
+	// 		pktBuffer, err := pkt.Marshal()
+	// 		if err != nil {
+	// 			log.Err(err).Msgf("failed to marshal packet data")
+	// 			return
+	// 		}
+	// 		fmt.Println("received packet is " + string(pktBuffer))
+	// 		if pkt.Header.Source != n.conf.Socket.GetAddress() {
+	// 			header := transport.NewHeader(nodeAddr, nodeAddr, n.conf.Socket.GetAddress(), 0)
+	// 			pkt.Header = &header
+	// 			fmt.Println("send locally")
+	// 			err = n.socketNAT.Send(n.conf.Socket.GetAddress(), pkt, sendTimeout)
+	// 			if err != nil {
+	// 				fmt.Println(err.Error())
+	// 				log.Err(err).Msg("errors: failed to send unicast message")
+	// 				return
+	// 			}
+	// 			fmt.Println("send locally success")
+	// 		} else {
+	// 			targetAddr := <-chanTargetAddr
+	// 			fmt.Println("receive target addr")
+	// 			header := transport.NewHeader(nodeAddr, nodeAddr, targetAddr, 0)
+	// 			pkt.Header = &header
+	// 			pktBuffer, err := pkt.Marshal()
+	// 			if err != nil {
+	// 				log.Err(err).Msgf("failed to marshal packet data")
+	// 				return
+	// 			}
+	// 			fmt.Println("start to write")
+	// 			connReg.Write(pktBuffer)
+	// 			fmt.Println("write successful")
+	// 		}
+	// 	}
+	// }()
+	// connReg.Write([]byte(n.conf.Socket.GetAddress()))
+	// time.Sleep(time.Second * 2)
+	// connReg.Write([]byte(n.conf.Socket.GetAddress()))
 	return nil
 	// panic("to be implemented in HW0")
 }
 
-func (n *node) register(serverRegIP string) {
-	rand.Seed(time.Now().UnixNano())
-	n.port = rand.Intn(3000) + 3000
+func (n *node) register(serverRegIP string) *net.UDPConn {
+
 	fmt.Println(n.port)
-    localAddr := net.UDPAddr{Port: n.port}
+	localAddr := net.UDPAddr{Port: n.port}
 	// localAddr, err := net.ResolveUDPAddr("udp", n.conf.Socket.GetAddress())
 	// if err != nil {
 	// 	log.Err(err).Msgf("failed to resolve UDP address %s", localAddr)
-	// 	return 
+	// 	return
 	// }
 	remoteAddr := net.UDPAddr{
 		IP:   net.ParseIP(serverIP),
@@ -123,49 +201,19 @@ func (n *node) register(serverRegIP string) {
 	conn, err := net.DialUDP("udp", &localAddr, &remoteAddr)
 	if err != nil {
 		fmt.Println(err.Error())
-		return
+		return nil
 	}
 	fmt.Println("register message to server")
 	conn.Write([]byte("This is peer: " + n.conf.Socket.GetAddress()))
 	buf := make([]byte, 256)
+
 	l, _, err := conn.ReadFromUDP(buf)
 	if err != nil {
-		return
+		return nil
 	}
 	fmt.Printf("%s \n", buf[:l])
-	conn.Close()
-
-	// header := transport.NewHeader(n.conf.Socket.GetAddress(), n.conf.Socket.GetAddress(), serverRegIP, 0)
-	// pkt := transport.Packet{
-	// 	Header: &header,
-	// 	Msg:    transport.Message{
-
-	// 	}
-	// 	types.ChatMessage{Message :"This is peer: " + n.conf.Socket.GetAddress()},
-	// }
-	// err := n.conf.Socket.Send(serverRegIP, pkt, sendTimeout)
-	// if err != nil {
-	// 	fmt.Println(err.Error())
-	// 	log.Err(err).Msg("errors: failed to send unicast message")
-	// 	return 
-	// }
-
+	return conn
 }
-
-// func(n *node) register(serverIP string) {
-// 	chat := types.ChatMessage{
-// 		Message: "this is my IP address:" + n.conf.Socket.GetAddress(),
-// 	}
-// 	data, err := json.Marshal(&chat)
-// 	if err != nil{
-// 		return
-// 	}
-// 	msg := transport.Message{
-// 		Type:    chat.Name(),
-// 		Payload: data,
-// 	}
-// 	n.Unicast(serverIP, msg)
-// }
 
 // Stop implements peer.Service
 func (n *node) Stop() error {
@@ -179,55 +227,27 @@ func (n *node) Stop() error {
 	// panic("to be implemented in HW0")
 }
 
-func (n *node) holePunching(dest string) (string) {
-	localAddr := net.UDPAddr{Port: n.port}
-	remoteAddr := net.UDPAddr{
-		IP:   net.ParseIP(serverIP),
-		Port: 8080,
-	}
-	fmt.Println("connect to server")
-	conn, err := net.DialUDP("udp", &localAddr, &remoteAddr)
-	if err != nil {
-		return ""
-	}
-	fmt.Println("request message to server")
-	conn.Write([]byte(n.conf.Socket.GetAddress() + "->" + dest))
-
-	buf := make([]byte, 256)
-	l, _, err := conn.ReadFromUDP(buf)
-	if err != nil {
-		return ""
-	}
-	conn.Close()
-	fmt.Println(string(buf[:l]))
-	return string(buf[:l])
-	// if strings.Contains(string(buf[:l]), "currently not online"){
-	// 	// try a long time after
-	// 	return false
-	// } else if strings.Contains(string(buf[:l]), "busy"){
-	// 	// try a short time after
-	// }
-}
-
 // Unicast implements peer.Messaging
 // check if there is a route to dest from routing table
 // if it is, get the nextHop address and send the message
 func (n *node) Unicast(dest string, msg transport.Message) error {
 	// panic("to be implemented in HW0")
-	localAddr := net.UDPAddr{Port: n.port}
-	fmt.Println(localAddr.String())
+
+
+	remoteAddr := net.UDPAddr{
+		IP:   net.ParseIP(serverIP),
+		Port: 8081,
+	}
+	//n.AddPeer(dest)
 	err := n.unicastLAN(dest, msg)
 	if strings.Contains(err.Error(), "unreachable dest") {
-		targetAddr := n.holePunching(dest)
-		if targetAddr == "" {
-			return nil
-		}
-		header := transport.NewHeader(localAddr.String(), localAddr.String(), targetAddr, 0)
+
+		header := transport.NewHeader(n.conf.Socket.GetAddress(), n.conf.Socket.GetAddress(), dest, 0)
 		pkt := transport.Packet{
 			Header: &header,
 			Msg:    &msg,
 		}
-		err := n.conf.Socket.Send(targetAddr, pkt, sendTimeout)
+		err = n.conf.Socket.Send(remoteAddr.String(), pkt, sendTimeout)
 		if err != nil {
 			fmt.Println(err.Error())
 			log.Err(err).Msg("errors: failed to send unicast message")
