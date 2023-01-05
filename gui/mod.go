@@ -68,13 +68,13 @@ func main() {
 						Name:  "proxyaddr",
 						Usage: "addr of the proxy",
 						// Value: "127.0.0.1:0",
-						Value: "10.20.0.133:0",
+						Value: "10.251.23.89:0",
 					},
 					&urfave.StringFlag{
 						Name:  "nodeaddr",
 						Usage: "addr of the node",
 						// Value: "127.0.0.1:0",
-						Value: "10.20.0.133:0",
+						Value: "10.251.23.89:0",
 					},
 					&urfave.DurationFlag{
 						Name:  "antientropy",

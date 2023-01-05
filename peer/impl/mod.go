@@ -19,9 +19,6 @@ import (
 
 const sendTimeout = 500 * time.Millisecond
 const serverIP = "20.203.183.91"
-const localIP = "10.20.0.133"
-
-// var chanTargetAddr chan string
 
 // NewPeer creates a new peer. You can change the content and location of this
 // function but you MUST NOT change its signature and package location.
@@ -36,7 +33,7 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 		rumorSequence: 0,
 		status:        make(map[string]uint),
 		rumorsLog:     make(map[string][]types.Rumor),
-		port:          rand.Intn(3000) + 3000,
+		port:          rand.Intn(5000) + 10000,
 	}
 
 	// initialization. Add itself to routing table
@@ -64,7 +61,7 @@ type node struct {
 	// all the rumors stored
 	rumorsLog map[string][]types.Rumor
 
-	port      int
+	port int
 	//socketNAT transport.ClosableSocket
 }
 
@@ -79,7 +76,7 @@ var Logger = zerolog.New(logout).Level(defaultLevel).
 	With().Timestamp().Logger().
 	With().Caller().Logger()
 
-// chanTargetAddr := make(chan string, 1)
+var stopCh chan int
 
 // Start implements peer.Service
 func (n *node) Start() error {
@@ -99,87 +96,16 @@ func (n *node) Start() error {
 	if n.conf.AntiEntropyInterval > 0 {
 		go n.AntiEntropy()
 	}
-
-	connReg := n.register(serverIP)
-
-	// localIP := strings.Split(n.conf.Socket.GetAddress(), ":")[0]
-	// nodeAddr := localIP + ":" + strconv.Itoa(n.port+1)
-	// trans := udp.NewUDP()
-
-	// sock, err := trans.CreateSocket(nodeAddr)
-	// if err != nil {
-	// 	return nil
-	// }
-	// chanTargetAddr = make(chan string, 1)
-	// n.socketNAT = sock
-	go func() {
-		for {
-			buf := make([]byte, 65000)
-			fmt.Println("waiting for server message")
-			l, _, err := connReg.ReadFromUDP(buf)
-			if err != nil {
-				return
-			}
-			fmt.Println("received server message")
-			fmt.Printf("%s \n", buf[:l])
-			// packet := transport.Packet{}
-			// err = packet.Unmarshal(buf[:l])
-			// if err != nil {
-			// 	log.Err(err).Msgf("failed to unmarshal UDP packet")
-			// 	return
-			// }
-			// err = n.conf.Socket.Send(n.conf.Socket.GetAddress(), packet, sendTimeout)
-			// if err != nil {
-			// 	log.Err(err).Msg("errors: failed to send unicast message")
-			// 	return
-			// }
+	stopCh = make(chan int, 1)
+	go func(){
+		for{
+			conn := n.register(serverIP)
+			time.Sleep(time.Second * 120)
+			stopCh <- 1
+			conn.Close()
 		}
-	}()
 
-	// go func() {
-	// 	for {
-	// 		pkt, err := n.socketNAT.Recv(time.Second * 10)
-	// 		if errors.Is(err, transport.TimeoutError(0)) {
-	// 			continue
-	// 		} else if err != nil {
-	// 			log.Err(err).Msg("socket recv has error")
-	// 		}
-	// 		pktBuffer, err := pkt.Marshal()
-	// 		if err != nil {
-	// 			log.Err(err).Msgf("failed to marshal packet data")
-	// 			return
-	// 		}
-	// 		fmt.Println("received packet is " + string(pktBuffer))
-	// 		if pkt.Header.Source != n.conf.Socket.GetAddress() {
-	// 			header := transport.NewHeader(nodeAddr, nodeAddr, n.conf.Socket.GetAddress(), 0)
-	// 			pkt.Header = &header
-	// 			fmt.Println("send locally")
-	// 			err = n.socketNAT.Send(n.conf.Socket.GetAddress(), pkt, sendTimeout)
-	// 			if err != nil {
-	// 				fmt.Println(err.Error())
-	// 				log.Err(err).Msg("errors: failed to send unicast message")
-	// 				return
-	// 			}
-	// 			fmt.Println("send locally success")
-	// 		} else {
-	// 			targetAddr := <-chanTargetAddr
-	// 			fmt.Println("receive target addr")
-	// 			header := transport.NewHeader(nodeAddr, nodeAddr, targetAddr, 0)
-	// 			pkt.Header = &header
-	// 			pktBuffer, err := pkt.Marshal()
-	// 			if err != nil {
-	// 				log.Err(err).Msgf("failed to marshal packet data")
-	// 				return
-	// 			}
-	// 			fmt.Println("start to write")
-	// 			connReg.Write(pktBuffer)
-	// 			fmt.Println("write successful")
-	// 		}
-	// 	}
-	// }()
-	// connReg.Write([]byte(n.conf.Socket.GetAddress()))
-	// time.Sleep(time.Second * 2)
-	// connReg.Write([]byte(n.conf.Socket.GetAddress()))
+	}()
 	return nil
 	// panic("to be implemented in HW0")
 }
@@ -188,11 +114,6 @@ func (n *node) register(serverRegIP string) *net.UDPConn {
 
 	fmt.Println(n.port)
 	localAddr := net.UDPAddr{Port: n.port}
-	// localAddr, err := net.ResolveUDPAddr("udp", n.conf.Socket.GetAddress())
-	// if err != nil {
-	// 	log.Err(err).Msgf("failed to resolve UDP address %s", localAddr)
-	// 	return
-	// }
 	remoteAddr := net.UDPAddr{
 		IP:   net.ParseIP(serverIP),
 		Port: 8081,
@@ -209,9 +130,37 @@ func (n *node) register(serverRegIP string) *net.UDPConn {
 
 	l, _, err := conn.ReadFromUDP(buf)
 	if err != nil {
+		fmt.Println(err.Error())
 		return nil
 	}
 	fmt.Printf("%s \n", buf[:l])
+	go func() {
+		for {
+			select{
+			case <-stopCh:
+				return
+			default:
+				buf := make([]byte, 65000)
+				l, _, err := conn.ReadFromUDP(buf)
+				if err != nil {
+					fmt.Println("fail to read from UDP")
+				}
+				fmt.Printf("%s \n", buf[:l])
+				packet := transport.Packet{}
+				err = packet.Unmarshal(buf[:l])
+				if err != nil {
+					log.Err(err).Msgf("failed to unmarshal UDP packet")
+					continue
+				}
+				err = n.conf.Socket.Send(n.conf.Socket.GetAddress(), packet, sendTimeout)
+				if err != nil {
+					log.Err(err).Msg("errors: failed to send unicast message")
+					continue
+				}
+			}
+
+		}
+	}()
 	return conn
 }
 
@@ -233,11 +182,9 @@ func (n *node) Stop() error {
 func (n *node) Unicast(dest string, msg transport.Message) error {
 	// panic("to be implemented in HW0")
 
-
-	remoteAddr := net.UDPAddr{
-		IP:   net.ParseIP(serverIP),
-		Port: 8081,
-	}
+	// localAddr := net.UDPAddr{
+	// 	IP: net.ParseIP(localIP),
+	// 	Port: n.port+1}
 	//n.AddPeer(dest)
 	err := n.unicastLAN(dest, msg)
 	if strings.Contains(err.Error(), "unreachable dest") {
@@ -247,12 +194,13 @@ func (n *node) Unicast(dest string, msg transport.Message) error {
 			Header: &header,
 			Msg:    &msg,
 		}
-		err = n.conf.Socket.Send(remoteAddr.String(), pkt, sendTimeout)
+		err = n.conf.Socket.Send(serverIP+":"+"8081", pkt, sendTimeout)
 		if err != nil {
 			fmt.Println(err.Error())
 			log.Err(err).Msg("errors: failed to send unicast message")
 			return fmt.Errorf("fail to send message")
 		}
+
 	} else if strings.Contains(err.Error(), "fail to send message") {
 		return fmt.Errorf("fail to send message")
 	}
